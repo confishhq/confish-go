@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  repository_dispatch:
+    types: [confish-main-updated]
   push:
     branches: [main, master]
     tags: ['v*']
