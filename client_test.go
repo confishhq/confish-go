@@ -52,53 +52,6 @@ func newTestClient(t *testing.T, baseURL string) *Client {
 	return c
 }
 
-func TestFetchDecodesIntoStruct(t *testing.T) {
-	srv, calls := newTestServer(t, func(_ recordedRequest, w http.ResponseWriter) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"site_name":"My App","max_upload_mb":25,"maintenance_mode":false}`))
-	})
-	c := newTestClient(t, srv.URL)
-
-	type Config struct {
-		SiteName        string `json:"site_name"`
-		MaxUploadMB     int    `json:"max_upload_mb"`
-		MaintenanceMode bool   `json:"maintenance_mode"`
-	}
-	var got Config
-	if err := c.Fetch(context.Background(), &got); err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	if got.SiteName != "My App" || got.MaxUploadMB != 25 || got.MaintenanceMode {
-		t.Fatalf("unexpected config: %+v", got)
-	}
-	if (*calls)[0].Path != "/c/env_test" {
-		t.Fatalf("path: %q", (*calls)[0].Path)
-	}
-	if (*calls)[0].Auth != "Bearer confish_sk_test" {
-		t.Fatalf("auth: %q", (*calls)[0].Auth)
-	}
-}
-
-func TestUpdateWrapsValues(t *testing.T) {
-	srv, calls := newTestServer(t, func(_ recordedRequest, w http.ResponseWriter) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
-	})
-	c := newTestClient(t, srv.URL)
-
-	err := c.Update(context.Background(), map[string]any{"maintenance_mode": true}, nil)
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if (*calls)[0].Method != http.MethodPatch {
-		t.Fatalf("method: %s", (*calls)[0].Method)
-	}
-	values, ok := (*calls)[0].Body["values"].(map[string]any)
-	if !ok || values["maintenance_mode"] != true {
-		t.Fatalf("body: %+v", (*calls)[0].Body)
-	}
-}
-
 func TestAuthErrorOn401(t *testing.T) {
 	srv, _ := newTestServer(t, func(_ recordedRequest, w http.ResponseWriter) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -107,7 +60,7 @@ func TestAuthErrorOn401(t *testing.T) {
 	c := newTestClient(t, srv.URL)
 
 	var cfg map[string]any
-	err := c.Fetch(context.Background(), &cfg)
+	err := c.Config.Fetch(context.Background(), &cfg)
 	var authErr *AuthError
 	if !errors.As(err, &authErr) {
 		t.Fatalf("expected *AuthError, got %T: %v", err, err)
@@ -124,7 +77,7 @@ func TestValidationErrorExposesFieldErrors(t *testing.T) {
 	})
 	c := newTestClient(t, srv.URL)
 
-	err := c.Update(context.Background(), map[string]any{"x": 1}, nil)
+	err := c.Config.Update(context.Background(), map[string]any{"x": 1}, nil)
 	var ve *ValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected *ValidationError, got %T", err)
@@ -150,7 +103,7 @@ func TestRateLimitRetriesThenSucceeds(t *testing.T) {
 	c := newTestClient(t, srv.URL)
 
 	var got map[string]any
-	if err := c.Fetch(context.Background(), &got); err != nil {
+	if err := c.Config.Fetch(context.Background(), &got); err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	if attempts != 2 {
@@ -168,30 +121,13 @@ func TestRateLimitExhaustsRetries(t *testing.T) {
 	c := newTestClient(t, srv.URL)
 
 	var got map[string]any
-	err := c.Fetch(context.Background(), &got)
+	err := c.Config.Fetch(context.Background(), &got)
 	var rl *RateLimitError
 	if !errors.As(err, &rl) {
 		t.Fatalf("expected *RateLimitError, got %T", err)
 	}
 	if rl.Limit != 60 {
 		t.Fatalf("limit: %d", rl.Limit)
-	}
-}
-
-func TestLogReturnsID(t *testing.T) {
-	srv, _ := newTestServer(t, func(_ recordedRequest, w http.ResponseWriter) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":"log_123"}`))
-	})
-	c := newTestClient(t, srv.URL)
-
-	id, err := c.Log(context.Background(), LogEntry{Level: LevelInfo, Message: "hi"})
-	if err != nil {
-		t.Fatalf("Log: %v", err)
-	}
-	if id != "log_123" {
-		t.Fatalf("id: %s", id)
 	}
 }
 

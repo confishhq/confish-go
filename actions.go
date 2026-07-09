@@ -84,8 +84,8 @@ func (a *Actions) Ack(ctx context.Context, actionID string) (Action, error) {
 	return a.simpleAction(ctx, "/ack", actionID, nil)
 }
 
-// Update appends a timeline update to an action.
-func (a *Actions) Update(ctx context.Context, actionID, message string, data map[string]any) (Action, error) {
+// Progress appends a progress note to the action's timeline.
+func (a *Actions) Progress(ctx context.Context, actionID, message string, data map[string]any) (Action, error) {
 	body := map[string]any{"message": message}
 	if data != nil {
 		body["data"] = data
@@ -118,9 +118,10 @@ func resultBody(result map[string]any) map[string]any {
 	return body
 }
 
-// ActionUpdater is provided to Handler so it can append timeline updates.
+// ActionUpdater is provided to Handler so it can append progress notes to the
+// action's timeline.
 type ActionUpdater interface {
-	Update(ctx context.Context, message string, data map[string]any) error
+	Progress(ctx context.Context, message string, data map[string]any) error
 }
 
 // ActionHandler processes a single action. Returning a non-nil result becomes the
@@ -273,8 +274,8 @@ type actionUpdater struct {
 	actionID string
 }
 
-func (u *actionUpdater) Update(ctx context.Context, message string, data map[string]any) error {
-	_, err := u.actions.Update(ctx, u.actionID, message, data)
+func (u *actionUpdater) Progress(ctx context.Context, message string, data map[string]any) error {
+	_, err := u.actions.Progress(ctx, u.actionID, message, data)
 	return err
 }
 

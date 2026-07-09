@@ -47,6 +47,37 @@ func TestActionsCompleteWithResult(t *testing.T) {
 	}
 }
 
+func TestActionsProgressPostsToUpdateEndpoint(t *testing.T) {
+	var path string
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"a1","status":"acknowledged","updates":[{"message":"closing 3 positions"}]}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	action, err := c.Actions.Progress(context.Background(), "a1", "closing 3 positions", map[string]any{"step": 2})
+	if err != nil {
+		t.Fatalf("Progress: %v", err)
+	}
+	if path != "/c/env_test/actions/a1/update" {
+		t.Fatalf("path: %q", path)
+	}
+	if captured["message"] != "closing 3 positions" {
+		t.Fatalf("captured: %+v", captured)
+	}
+	data, ok := captured["data"].(map[string]any)
+	if !ok || data["step"] != float64(2) {
+		t.Fatalf("data: %+v", captured["data"])
+	}
+	if len(action.Updates) != 1 || action.Updates[0].Message != "closing 3 positions" {
+		t.Fatalf("updates: %+v", action.Updates)
+	}
+}
+
 func TestConsumeProcessesAction(t *testing.T) {
 	var listCount int32
 	var completed atomic.Bool

@@ -17,17 +17,26 @@ func sign(secret string, ts int64, body []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func TestVerifyAcceptsValidSignature(t *testing.T) {
+func TestVerifyReturnsParsedPayload(t *testing.T) {
 	secret := "whsec_test"
-	body := []byte(`{"event":"environment.updated"}`)
+	body := []byte(`{"event":"environment.updated","environment":{"name":"Production","env_id":"env_1"},"changes":["site_name"]}`)
 	ts := int64(1_700_000_000)
 	header := fmt.Sprintf("ts=%d;sig=%s", ts, sign(secret, ts, body))
 
-	err := Verify(body, header, secret, Options{
+	payload, err := Verify(body, header, secret, Options{
 		Now: func() time.Time { return time.Unix(ts, 0) },
 	})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
+	}
+	if payload.Event != "environment.updated" {
+		t.Fatalf("event: %q", payload.Event)
+	}
+	if payload.Environment.EnvID != "env_1" {
+		t.Fatalf("env_id: %q", payload.Environment.EnvID)
+	}
+	if len(payload.Changes) != 1 || payload.Changes[0] != "site_name" {
+		t.Fatalf("changes: %+v", payload.Changes)
 	}
 }
 
@@ -36,7 +45,7 @@ func TestVerifyRejectsWrongSecret(t *testing.T) {
 	ts := int64(1_700_000_000)
 	header := fmt.Sprintf("ts=%d;sig=%s", ts, sign("other", ts, body))
 
-	err := Verify(body, header, "whsec_test", Options{
+	_, err := Verify(body, header, "whsec_test", Options{
 		Now: func() time.Time { return time.Unix(ts, 0) },
 	})
 	if !errors.Is(err, ErrInvalidSignature) {
@@ -51,7 +60,7 @@ func TestVerifyRejectsTamperedBody(t *testing.T) {
 	ts := int64(1_700_000_000)
 	header := fmt.Sprintf("ts=%d;sig=%s", ts, sign(secret, ts, original))
 
-	err := Verify(tampered, header, secret, Options{
+	_, err := Verify(tampered, header, secret, Options{
 		Now: func() time.Time { return time.Unix(ts, 0) },
 	})
 	if !errors.Is(err, ErrInvalidSignature) {
@@ -65,34 +74,40 @@ func TestVerifyRejectsStaleTimestamp(t *testing.T) {
 	ts := int64(1_700_000_000)
 	header := fmt.Sprintf("ts=%d;sig=%s", ts, sign(secret, ts, body))
 
-	err := Verify(body, header, secret, Options{
+	_, err := Verify(body, header, secret, Options{
 		Tolerance: 5 * time.Minute,
 		Now:       func() time.Time { return time.Unix(ts+600, 0) },
 	})
-	if !errors.Is(err, ErrInvalidSignature) {
-		t.Fatalf("expected ErrInvalidSignature, got %v", err)
+	if !errors.Is(err, ErrTimestampOutsideTolerance) {
+		t.Fatalf("expected ErrTimestampOutsideTolerance, got %v", err)
+	}
+	if errors.Is(err, ErrInvalidSignature) {
+		t.Fatal("stale timestamp should be distinguishable from an invalid signature")
 	}
 }
 
 func TestVerifyAcceptsStaleTimestampWhenToleranceDisabled(t *testing.T) {
 	secret := "whsec_test"
-	body := []byte(`{}`)
+	body := []byte(`{"event":"environment.updated"}`)
 	ts := int64(1_700_000_000)
 	header := fmt.Sprintf("ts=%d;sig=%s", ts, sign(secret, ts, body))
 
-	err := Verify(body, header, secret, Options{
+	payload, err := Verify(body, header, secret, Options{
 		Tolerance: -1,
 		Now:       func() time.Time { return time.Unix(ts+99_999, 0) },
 	})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
+	if payload.Event != "environment.updated" {
+		t.Fatalf("event: %q", payload.Event)
+	}
 }
 
 func TestVerifyRejectsMalformedHeaders(t *testing.T) {
 	cases := []string{"", "garbage", "ts=abc;sig=def", "ts=1;sig="}
 	for _, h := range cases {
-		if err := Verify([]byte(`{}`), h, "secret", Options{}); !errors.Is(err, ErrInvalidSignature) {
+		if _, err := Verify([]byte(`{}`), h, "secret", Options{}); !errors.Is(err, ErrInvalidSignature) {
 			t.Fatalf("header %q: expected ErrInvalidSignature, got %v", h, err)
 		}
 	}

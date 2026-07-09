@@ -27,6 +27,10 @@ type AuthError struct{ *APIError }
 // is disabled, or the action does not belong to this environment (HTTP 403).
 type ForbiddenError struct{ *APIError }
 
+// NotFoundError indicates the requested resource does not exist — e.g. an unknown
+// feed slug or action ID (HTTP 404).
+type NotFoundError struct{ *APIError }
+
 // ConflictError indicates the action is no longer actionable — typically because it
 // has already been acknowledged or has expired (HTTP 409). The action consumer
 // silently skips actions that fail to acknowledge with this error.

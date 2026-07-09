@@ -47,10 +47,12 @@ type Client struct {
 	maxRetries    int
 	maxRetryDelay time.Duration
 
+	// Config exposes the typed configuration API.
+	Config *Config
 	// Actions exposes the action management API.
 	Actions *Actions
-	// Logger provides convenience methods for sending log entries.
-	Logger *Logger
+	// Logs exposes the log ingestion API.
+	Logs *Logs
 }
 
 // New constructs a Client with the given options.
@@ -86,42 +88,10 @@ func New(opts Options) (*Client, error) {
 		maxRetries:    opts.MaxRetries,
 		maxRetryDelay: opts.MaxRetryDelay,
 	}
+	c.Config = &Config{client: c}
 	c.Actions = &Actions{client: c}
-	c.Logger = &Logger{client: c}
+	c.Logs = &Logs{client: c}
 	return c, nil
-}
-
-// Fetch retrieves the environment's typed configuration and decodes it into out.
-// out must be a pointer to a struct (or map[string]any) with json tags matching
-// the field keys defined in the application schema.
-func (c *Client) Fetch(ctx context.Context, out any) error {
-	return c.do(ctx, http.MethodGet, "/c/"+c.envID, nil, out)
-}
-
-// Update partially updates the environment's configuration values (PATCH).
-// Only the fields present in values are changed. If out is non-nil, the response
-// (the full updated configuration) is decoded into it.
-func (c *Client) Update(ctx context.Context, values any, out any) error {
-	return c.do(ctx, http.MethodPatch, "/c/"+c.envID, map[string]any{"values": values}, out)
-}
-
-// Replace replaces all configuration values (PUT). Fields not present in values are
-// reset to their defaults. If out is non-nil, the full updated configuration is
-// decoded into it.
-func (c *Client) Replace(ctx context.Context, values any, out any) error {
-	return c.do(ctx, http.MethodPut, "/c/"+c.envID, map[string]any{"values": values}, out)
-}
-
-// Log sends a log entry to confish. If out is non-nil, the response (containing the
-// new log entry's ID) is decoded into it.
-func (c *Client) Log(ctx context.Context, entry LogEntry) (string, error) {
-	var resp struct {
-		ID string `json:"id"`
-	}
-	if err := c.do(ctx, http.MethodPost, "/c/"+c.envID+"/log", entry, &resp); err != nil {
-		return "", err
-	}
-	return resp.ID, nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
@@ -226,6 +196,8 @@ func errorFromResponse(status int, body []byte, headers http.Header) error {
 		return &AuthError{APIError: base}
 	case status == http.StatusForbidden:
 		return &ForbiddenError{APIError: base}
+	case status == http.StatusNotFound:
+		return &NotFoundError{APIError: base}
 	case status == http.StatusConflict:
 		return &ConflictError{APIError: base}
 	case status == http.StatusUnprocessableEntity:
