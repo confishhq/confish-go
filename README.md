@@ -1,6 +1,6 @@
 # confish-go
 
-Official Go SDK for [confish](https://confi.sh) — typed configuration, logs, actions, feeds, and webhook verification.
+Official Go SDK for [confish](https://confi.sh) — typed configuration, actions, logs, feeds, and webhook verification.
 
 - Standard-library only, no dependencies
 - Context-aware HTTP with automatic retries on `429`/`5xx`
