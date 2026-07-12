@@ -88,9 +88,53 @@ id, err := client.Logs.Write(ctx, confish.LogEntry{
     Message: "User logged in",
     Context: map[string]any{"user_id": 123},
 })
+
+// Or write several in one request (max 100 per batch; returns IDs in order):
+ids, err := client.Logs.WriteBatch(ctx, []confish.LogEntry{
+    {Level: confish.LevelInfo, Message: "Crawl started"},
+    {Level: confish.LevelError, Message: "Crawl failed", Context: map[string]any{"pages": 118}},
+})
 ```
 
+`WriteBatch` accepts at most `confish.MaxLogBatchSize` (100) entries — passing more returns an error before any request is made, so chunk larger batches yourself (the slog handler below does this for you). An empty slice is a no-op.
+
+An entry's `Timestamp` (RFC3339) is optional — leave it empty and the server stamps arrival time; set it when you send entries later than you logged them.
+
 Levels: `LevelDebug`, `LevelInfo`, `LevelNotice`, `LevelWarning`, `LevelError`, `LevelCritical`, `LevelAlert`, `LevelEmergency`. They follow RFC 5424 (syslog), so they map cleanly onto `log/slog` levels.
+
+### Use as an slog handler
+
+Route your existing `log/slog` calls to confish — no call-site changes, your code keeps logging the way it already does:
+
+```go
+handler, err := confish.NewSlogHandler(client, confish.SlogHandlerOptions{
+    Level: slog.LevelInfo, // minimum level shipped (the default)
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer handler.Close() // stops the flusher and ships anything still queued
+
+slog.SetDefault(slog.New(handler))
+
+slog.Info("crawl started", "site", "example.com")
+slog.With("job_id", "sitemap-crawl").Error("crawl failed", "pages", 118)
+```
+
+Records are queued in memory and shipped in the background: a flush runs as soon as 50 entries are queued or every 5 seconds, whichever comes first, chunked to at most 100 entries per request. Each entry carries the timestamp captured at log time, so delayed flushes don't skew your incident timeline. `Handle` never blocks on the network and never returns an error into your logging path.
+
+slog names four levels; confish exports the other four RFC 5424 levels in slog's numbering gaps, so the full ladder is `slog.LevelDebug` (-4), `slog.LevelInfo` (0), `confish.SlogLevelNotice` (2), `slog.LevelWarn` (4), `slog.LevelError` (8), `confish.SlogLevelCritical` (12), `confish.SlogLevelAlert` (16), `confish.SlogLevelEmergency` (20). Any in-between level maps down to the nearest named one.
+
+```go
+slog.Log(ctx, confish.SlogLevelNotice, "nightly crawl finished cleanly")
+slog.Log(ctx, confish.SlogLevelEmergency, "primary region unreachable")
+```
+
+Groups flatten into dotted context keys — `slog.New(handler).WithGroup("job").With("id", "nightly-crawl")` puts `job.id` in each entry's context.
+
+The queue is bounded (1,000 entries by default). If you log faster than flushes drain it, the oldest entries are dropped first — `handler.Dropped()` counts everything lost (overflow evictions and entries a flush couldn't deliver after retries), and the optional `OnDrop`/`OnError` callbacks let you observe drops and delivery failures as they happen (don't log through the handler inside them). Call `handler.Flush(ctx)` to push queued entries immediately, e.g. before a worker exits.
+
+Tune with `SlogHandlerOptions{Level, QueueSize, FlushThreshold, FlushInterval, CloseTimeout, OnError, OnDrop}`.
 
 ## Actions
 

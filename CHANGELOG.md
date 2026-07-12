@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.0 — 2026-07-12
+
+### Added
+
+- **slog adapter**: `NewSlogHandler(client, SlogHandlerOptions{...})` returns a `log/slog` Handler that ships records to confish in the background. Bounded in-memory queue (default 1000; oldest entries dropped on overflow), flushed when 50 entries are queued or every 5 seconds — whichever comes first — and chunked to at most 100 entries per request. Each entry carries the timestamp captured at log time. Groups flatten into dotted context keys (`job.id`). Includes explicit `Flush(ctx)` and `Close()` (final flush bounded by `CloseTimeout`), a `Dropped()` counter, and optional `OnError`/`OnDrop` callbacks. `Handle` never blocks on the network and never returns delivery errors into the caller's logging path. Safe for concurrent use.
+- `SlogLevelNotice` (2), `SlogLevelCritical` (12), `SlogLevelAlert` (16), `SlogLevelEmergency` (20) — `slog.Level` constants in slog's numbering gaps, making all eight RFC 5424 levels reachable; in-between levels map down to the nearest named level.
+- `Logs.WriteBatch(ctx, entries)` — batch log write (`POST /c/{env}/logs`), returning the new entries' IDs in input order. At most `MaxLogBatchSize` = 100 entries per request — larger batches fail fast client-side without making a request (aligned across all five SDKs); an empty slice is a no-op.
+- `LogEntry.Timestamp` — optional RFC3339 timestamp; when empty the server stamps arrival time.
+
 ## v0.2.0 — 2026-07-09
 
 Coordinated minor across all five confish SDKs: the new feeds resource, plus a one-time pre-adoption reshuffle of the existing surface.

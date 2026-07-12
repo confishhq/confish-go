@@ -1,7 +1,8 @@
 // Package confish is the official Go SDK for confish (https://confi.sh).
 //
-// It provides a typed client for fetching configuration, sending logs,
-// consuming actions, publishing feed items, and verifying webhook signatures.
+// It provides a typed client for fetching configuration, sending logs
+// (directly or through a log/slog handler — see NewSlogHandler), consuming
+// actions, publishing feed items, and verifying webhook signatures.
 //
 // # Quick start
 //

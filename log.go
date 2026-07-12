@@ -2,6 +2,7 @@ package confish
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 )
 
@@ -19,11 +20,21 @@ const (
 	LevelEmergency LogLevel = "emergency"
 )
 
-// LogEntry is the payload for POST /c/{env}/log.
+// MaxLogBatchSize is the maximum number of entries the server accepts in a
+// single WriteBatch request.
+const MaxLogBatchSize = 100
+
+// LogEntry is a single log line, used both for POST /c/{env}/log (Write) and
+// as one element of a POST /c/{env}/logs batch (WriteBatch).
 type LogEntry struct {
 	Level   LogLevel       `json:"level"`
 	Message string         `json:"message"`
 	Context map[string]any `json:"context,omitempty"`
+	// Timestamp is an optional RFC3339 time for the entry. When empty the
+	// server stamps arrival time — set it whenever sending is deferred (the
+	// slog handler always records the original log time here, because its
+	// flushes are delayed).
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 // Logs wraps the log ingestion endpoint, with convenience methods for each level.
@@ -40,6 +51,28 @@ func (l *Logs) Write(ctx context.Context, entry LogEntry) (string, error) {
 		return "", err
 	}
 	return resp.ID, nil
+}
+
+// WriteBatch sends up to MaxLogBatchSize entries in a single request
+// (POST /c/{env}/logs) and returns the new entries' IDs, in input order.
+// Passing more than MaxLogBatchSize entries fails fast without making a
+// request — chunk larger batches yourself (the slog handler already does).
+// An empty slice is a no-op: no request, nil IDs, nil error.
+func (l *Logs) WriteBatch(ctx context.Context, entries []LogEntry) ([]string, error) {
+	if len(entries) > MaxLogBatchSize {
+		return nil, fmt.Errorf("confish: WriteBatch accepts at most %d entries per request, got %d", MaxLogBatchSize, len(entries))
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	var resp struct {
+		IDs []string `json:"ids"`
+	}
+	body := map[string]any{"entries": entries}
+	if err := l.client.do(ctx, http.MethodPost, "/c/"+l.client.envID+"/logs", body, &resp); err != nil {
+		return nil, err
+	}
+	return resp.IDs, nil
 }
 
 func (l *Logs) Debug(ctx context.Context, message string, fields map[string]any) error {
